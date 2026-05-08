@@ -18,8 +18,8 @@ A full calculus calculator covering the entire QCAA Mathematical Methods syllabu
 ## Setup
 
 ```bash
-pip install sympy                          # calculator only
-pip install sympy opencv-python face-recognition numpy   # + prank
+pip install sympy                                   # calculator only
+pip install sympy opencv-contrib-python numpy       # + prank (no compilation needed)
 ```
 
 ## Run

@@ -15,7 +15,6 @@ import platform
 # ── Face detection imports (optional – prank only works if installed) ──────────
 try:
     import cv2
-    import face_recognition
     import numpy as np
     FACE_RECOGNITION_AVAILABLE = True
 except ImportError:
@@ -29,24 +28,56 @@ x, t, n, a, b, c = sp.symbols('x t n a b c')
 # ══════════════════════════════════════════════════════════════════════════════
 
 class LachlanDetector:
-    """Watches the webcam. If Lachlan is detected → shut down the computer."""
+    """Watches the webcam. If Lachlan is detected → shut down the computer.
 
-    def __init__(self, encoding_path: str = "lachlan.jpg"):
-        self.encoding_path = encoding_path
+    Uses OpenCV LBPH face recogniser — no dlib/cmake compilation required.
+    Confidence is a distance score: lower = better match. Threshold ~90 works
+    well for a single training image.
+    """
+
+    CONFIDENCE_THRESHOLD = 90  # lower = stricter match
+    FACE_SIZE = (100, 100)
+
+    def __init__(self, photo_path: str = "lachlan.jpg"):
+        self.photo_path = photo_path
         self.running = False
         self._thread = None
-        self.lachlan_encoding = None
+        self._recognizer = None
+        self._cascade = None
 
     def load_target(self) -> bool:
         if not FACE_RECOGNITION_AVAILABLE:
             return False
-        if not os.path.exists(self.encoding_path):
+        if not os.path.exists(self.photo_path):
             return False
-        img = face_recognition.load_image_file(self.encoding_path)
-        encs = face_recognition.face_encodings(img)
-        if not encs:
+
+        # Load Haar cascade (bundled with opencv)
+        cascade_path = cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
+        self._cascade = cv2.CascadeClassifier(cascade_path)
+
+        img = cv2.imread(self.photo_path)
+        if img is None:
             return False
-        self.lachlan_encoding = encs[0]
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        faces = self._cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5)
+        if len(faces) == 0:
+            return False
+
+        # Use the largest detected face as the training sample
+        x_, y_, w_, h_ = max(faces, key=lambda f: f[2] * f[3])
+        face_crop = cv2.resize(gray[y_:y_+h_, x_:x_+w_], self.FACE_SIZE)
+
+        # Train LBPH on that single crop + a few augmented variants for robustness
+        samples, labels = [], []
+        for flip in (False, True):
+            img_ = cv2.flip(face_crop, 1) if flip else face_crop
+            for brightness in (0, 20, -20):
+                adjusted = np.clip(img_.astype(np.int16) + brightness, 0, 255).astype(np.uint8)
+                samples.append(adjusted)
+                labels.append(0)
+
+        self._recognizer = cv2.face.LBPHFaceRecognizer_create()
+        self._recognizer.train(samples, np.array(labels))
         return True
 
     def _shutdown(self):
@@ -69,23 +100,20 @@ class LachlanDetector:
                 time.sleep(0.5)
                 continue
 
-            # Scale down for speed
-            small = cv2.resize(frame, (0, 0), fx=0.25, fy=0.25)
-            rgb = small[:, :, ::-1]  # BGR → RGB
+            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            faces = self._cascade.detectMultiScale(
+                gray, scaleFactor=1.1, minNeighbors=5, minSize=(60, 60)
+            )
 
-            locations = face_recognition.face_locations(rgb)
-            encodings = face_recognition.face_encodings(rgb, locations)
-
-            for enc in encodings:
-                match = face_recognition.compare_faces(
-                    [self.lachlan_encoding], enc, tolerance=0.50
-                )
-                if match[0]:
+            for (fx, fy, fw, fh) in faces:
+                face_crop = cv2.resize(gray[fy:fy+fh, fx:fx+fw], self.FACE_SIZE)
+                label, confidence = self._recognizer.predict(face_crop)
+                if label == 0 and confidence < self.CONFIDENCE_THRESHOLD:
                     cap.release()
                     self._shutdown()
                     return
 
-            time.sleep(0.3)
+            time.sleep(0.25)
 
         cap.release()
 
