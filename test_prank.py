@@ -3,21 +3,43 @@ Prank calibration tool.
 Run this BEFORE the calculator to check:
   1. Your photo loads and a face is found in it
   2. What confidence scores the webcam sees for your face
+  3. Whether the shutdown command actually works on this PC
 
 Lower confidence = better match. The calculator triggers shutdown
-when confidence < CONFIDENCE_THRESHOLD (currently 90).
-This tool will tell you what number to use.
+when confidence < CONFIDENCE_THRESHOLD (set in calculator.py).
 """
 
 import cv2
 import numpy as np
 import os
 import sys
+import platform
+import subprocess
 
 PHOTO = "lachlan.jpg"
 FACE_SIZE = (100, 100)
 
 cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
+
+
+def test_shutdown():
+    """Schedule a shutdown 30 seconds away, then immediately cancel it.
+    This confirms the shutdown command works WITHOUT actually shutting down."""
+    system = platform.system()
+    print("\n[TEST] Testing shutdown command (will schedule then immediately cancel)...")
+    if system == "Windows":
+        r = subprocess.run(["shutdown", "/s", "/f", "/t", "30"],
+                           capture_output=True, text=True)
+        if r.returncode == 0:
+            subprocess.run(["shutdown", "/a"], capture_output=True)
+            print("[OK] Shutdown command works! (/a cancelled the test)")
+        else:
+            print(f"[FAIL] Shutdown command failed: {r.stderr.strip()}")
+            print("  → Try running this script as Administrator.")
+    elif system == "Darwin":
+        print("[INFO] Skipping shutdown test on Mac — run manually if needed.")
+    else:
+        print("[INFO] Skipping shutdown test on Linux — run manually if needed.")
 
 
 def load_photo():
@@ -42,11 +64,10 @@ def load_photo():
     face_crop = cv2.resize(gray[y:y+h, x:x+w], FACE_SIZE)
     print(f"[OK] Face found in {PHOTO}  (region: x={x} y={y} w={w} h={h})")
 
-    # Draw box and save preview so user can verify it found the right face
     preview = img.copy()
     cv2.rectangle(preview, (x, y), (x+w, y+h), (0, 255, 0), 2)
     cv2.imwrite("lachlan_preview.jpg", preview)
-    print("[OK] Saved lachlan_preview.jpg — open it to confirm the face box looks right.")
+    print("[OK] Saved lachlan_preview.jpg — open it to confirm the green box is on the face.")
 
     return face_crop
 
@@ -71,10 +92,11 @@ def run_live(recognizer):
         print("[ERROR] Could not open webcam.")
         sys.exit(1)
 
-    print("\n[LIVE] Webcam open. Look at the camera.")
-    print("  Confidence scores will print below.")
-    print("  LOWER score = better match.")
+    print("\n[LIVE] Webcam open. Sit in front of the camera like Lachlan would.")
+    print("  Confidence scores print below. LOWER = better match.")
     print("  Press Q in the video window to quit.\n")
+
+    scores = []
 
     while True:
         ret, frame = cap.read()
@@ -84,25 +106,33 @@ def run_live(recognizer):
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         faces = cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(60, 60))
 
+        if len(faces) == 0:
+            cv2.putText(frame, "No face detected", (10, 30),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
+
         for (fx, fy, fw, fh) in faces:
             face_crop = cv2.resize(gray[fy:fy+fh, fx:fx+fw], FACE_SIZE)
             label, confidence = recognizer.predict(face_crop)
             conf_int = int(confidence)
+            scores.append(conf_int)
 
             if conf_int < 60:
                 verdict = "STRONG MATCH"
+                color = (0, 200, 0)
             elif conf_int < 100:
                 verdict = "GOOD MATCH"
+                color = (0, 180, 80)
             elif conf_int < 130:
                 verdict = "WEAK MATCH"
+                color = (0, 140, 255)
             else:
                 verdict = "no match"
+                color = (0, 0, 255)
 
             print(f"  confidence = {conf_int:4d}   {verdict}")
 
-            color = (0, 255, 0) if conf_int < 100 else (0, 0, 255)
             cv2.rectangle(frame, (fx, fy), (fx+fw, fy+fh), color, 2)
-            cv2.putText(frame, f"{conf_int} {verdict}", (fx, fy - 8),
+            cv2.putText(frame, f"{conf_int} — {verdict}", (fx, fy - 8),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.55, color, 2)
 
         cv2.imshow("Prank Calibration — press Q to quit", frame)
@@ -112,16 +142,22 @@ def run_live(recognizer):
     cap.release()
     cv2.destroyAllWindows()
 
-    print("\n─────────────────────────────────────────")
-    print("Look at the confidence values printed above.")
-    print("Your face when detected = those numbers.")
-    print("Set CONFIDENCE_THRESHOLD in calculator.py to")
-    print("~20 points ABOVE your typical score.")
-    print("e.g. if you see 65–80, set threshold = 100")
-    print("─────────────────────────────────────────")
+    if scores:
+        avg = int(sum(scores) / len(scores))
+        low = min(scores)
+        print(f"\n─────────────────────────────────────────")
+        print(f"Results: lowest={low}  average={avg}")
+        print(f"Recommended CONFIDENCE_THRESHOLD: {low + 15}")
+        print(f"Set this in calculator.py line ~41")
+        print(f"─────────────────────────────────────────")
+    else:
+        print("\n[!] No faces were detected at all during the live test.")
+        print("  → Check lachlan_preview.jpg to see if the photo is valid.")
+        print("  → Make sure your webcam is not covered and lighting is decent.")
 
 
 if __name__ == "__main__":
+    test_shutdown()
     face = load_photo()
     rec  = train(face)
     run_live(rec)

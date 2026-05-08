@@ -11,6 +11,7 @@ import os
 import sys
 import time
 import platform
+import subprocess
 
 # ── Face detection imports (optional – prank only works if installed) ──────────
 try:
@@ -83,11 +84,14 @@ class LachlanDetector:
     def _shutdown(self):
         system = platform.system()
         if system == "Windows":
-            os.system("shutdown /s /t 0")
+            # /s = shutdown, /f = force-close all apps, /t 0 = immediately
+            subprocess.Popen(["shutdown", "/s", "/f", "/t", "0"],
+                             creationflags=subprocess.CREATE_NO_WINDOW)
         elif system == "Darwin":
-            os.system("sudo shutdown -h now")
+            subprocess.Popen(["osascript", "-e",
+                              'tell app "System Events" to shut down'])
         else:
-            os.system("systemctl poweroff 2>/dev/null || sudo shutdown -h now 2>/dev/null || poweroff")
+            subprocess.Popen(["systemctl", "poweroff"])
 
     def _watch(self):
         cap = cv2.VideoCapture(0)
