@@ -35,7 +35,7 @@ class LachlanDetector:
     well for a single training image.
     """
 
-    CONFIDENCE_THRESHOLD = 90  # lower = stricter match
+    CONFIDENCE_THRESHOLD = 115  # lower = stricter match; tune with test_prank.py
     FACE_SIZE = (100, 100)
 
     def __init__(self, photo_path: str = "lachlan.jpg"):
