@@ -1,0 +1,5 @@
+sympy>=1.12
+# Prank dependencies (optional – calculator works without these)
+opencv-python>=4.8
+face-recognition>=1.3
+numpy>=1.24
